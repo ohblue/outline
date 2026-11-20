@@ -573,7 +573,7 @@ const RelationValueEditor = observer(function RelationValueEditor_({
   readOnly,
 }: Props) {
   const { t } = useTranslation();
-  const { documents, databases } = useStores();
+  const { auth, documents, databases } = useStores();
   const targetDatabaseId = property.config?.targetDatabaseId;
   const limitToViewId = property.config?.limitToViewId;
   const allowMultiple = property.config?.allowMultiple !== false;
@@ -585,7 +585,12 @@ const RelationValueEditor = observer(function RelationValueEditor_({
   const [candidateIds, setCandidateIds] = React.useState<string[]>();
 
   // fetch documents referenced by the current value so their titles resolve
+  // a guest cannot read documents outside the share, so there is nothing to
+  // ask for
   React.useEffect(() => {
+    if (!auth.user) {
+      return;
+    }
     for (const id of selectedIds) {
       if (!documents.get(id)) {
         void documents.fetch(id).catch(() => {
@@ -593,7 +598,7 @@ const RelationValueEditor = observer(function RelationValueEditor_({
         });
       }
     }
-  }, [documents, selectedIds]);
+  }, [auth.user, documents, selectedIds]);
 
   React.useEffect(() => {
     if (readOnly || candidateIds !== undefined) {

@@ -12,6 +12,7 @@ import {
   buildCollection,
   buildDatabase,
   buildDocument,
+  buildShare,
   buildTeam,
   buildUser,
   buildViewer,
@@ -156,6 +157,263 @@ describe("#databases.create", () => {
     } finally {
       scheduled.mockRestore();
     }
+  });
+});
+
+describe("public share access", () => {
+  async function buildSharedDatabase() {
+    const { team, user, collection } = await buildEnabledTeam();
+    const propertyId = randomUUID();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      name: "Roadmap",
+      dataSchema: [{ id: propertyId, name: "Status", type: PropertyType.Text }],
+    });
+    const share = await buildShare({
+      teamId: team.id,
+      userId: user.id,
+      documentId: database.id,
+      includeChildDocuments: true,
+    });
+    return { team, user, collection, database, share, propertyId };
+  }
+
+  describe("#databases.info", () => {
+    it("should return the schema to a guest with a share of the database", async () => {
+      const { database, share, propertyId } = await buildSharedDatabase();
+
+      const res = await server.post("/api/databases.info", {
+        body: { id: database.id, shareId: share.id },
+      });
+      const body = await res.json();
+
+      expect(res.status).toEqual(200);
+      expect(body.data.id).toEqual(database.id);
+      expect(body.data.name).toEqual("Roadmap");
+      expect(body.data.dataSchema[0].id).toEqual(propertyId);
+      expect(body.policies).toEqual([]);
+    });
+
+    it("should not expose a database through a share of another document", async () => {
+      const { team, user, collection } = await buildEnabledTeam();
+      const database = await buildDatabase({
+        teamId: team.id,
+        userId: user.id,
+        collectionId: collection.id,
+      });
+      const other = await buildDocument({
+        teamId: team.id,
+        userId: user.id,
+        collectionId: collection.id,
+      });
+      const share = await buildShare({
+        teamId: team.id,
+        userId: user.id,
+        documentId: other.id,
+      });
+
+      const res = await server.post("/api/databases.info", {
+        body: { id: database.id, shareId: share.id },
+      });
+
+      expect([403, 404]).toContain(res.status);
+    });
+
+    it("should return not found for a shared document that is not a database", async () => {
+      const { team, user, collection } = await buildEnabledTeam();
+      const document = await buildDocument({
+        teamId: team.id,
+        userId: user.id,
+        collectionId: collection.id,
+      });
+      const share = await buildShare({
+        teamId: team.id,
+        userId: user.id,
+        documentId: document.id,
+      });
+
+      const res = await server.post("/api/databases.info", {
+        body: { id: document.id, shareId: share.id },
+      });
+
+      expect(res.status).toEqual(404);
+    });
+
+    it("should return not found when the team has databases disabled", async () => {
+      const { team, database, share } = await buildSharedDatabase();
+      await team.update({ preferences: { documentDatabases: false } });
+
+      const res = await server.post("/api/databases.info", {
+        body: { id: database.id, shareId: share.id },
+      });
+
+      expect(res.status).toEqual(404);
+    });
+
+    it("should return not found for a revoked share", async () => {
+      const { user, database, share } = await buildSharedDatabase();
+      await share.update({ revokedAt: new Date(), revokedById: user.id });
+
+      const res = await server.post("/api/databases.info", {
+        body: { id: database.id, shareId: share.id },
+      });
+
+      expect(res.status).toEqual(404);
+    });
+
+    it("should require authentication without a shareId", async () => {
+      const { database } = await buildSharedDatabase();
+
+      const res = await server.post("/api/databases.info", {
+        body: { id: database.id },
+      });
+
+      expect(res.status).toEqual(401);
+    });
+  });
+
+  describe("#databases.shared_rows", () => {
+    it("should return the rows with properties but no content", async () => {
+      const { team, user, collection, database, share, propertyId } =
+        await buildSharedDatabase();
+      await buildDocument({
+        teamId: team.id,
+        userId: user.id,
+        collectionId: collection.id,
+        databaseId: database.id,
+        title: "Row one",
+        text: "secret body",
+        properties: { [propertyId]: "Done" },
+      });
+
+      const res = await server.post("/api/databases.shared_rows", {
+        body: { id: database.id, shareId: share.id },
+      });
+      const body = await res.json();
+
+      expect(res.status).toEqual(200);
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0].title).toEqual("Row one");
+      expect(body.data[0].properties[propertyId]).toEqual("Done");
+      expect(body.data[0].databaseId).toEqual(database.id);
+      expect(body.data[0].text).toBeUndefined();
+      expect(body.data[0].data).toBeUndefined();
+      expect(body.data[0].createdBy).toBeUndefined();
+      expect(body.policies).toEqual([]);
+    });
+
+    it("should filter and compute summaries over the rows", async () => {
+      const { team, user, collection, database, share } =
+        await buildSharedDatabase();
+      const numberId = randomUUID();
+      await database.update({
+        dataSchema: [
+          { id: numberId, name: "Points", type: PropertyType.Number },
+        ],
+      });
+      for (const points of [1, 2, 3]) {
+        await buildDocument({
+          teamId: team.id,
+          userId: user.id,
+          collectionId: collection.id,
+          databaseId: database.id,
+          properties: { [numberId]: points },
+        });
+      }
+
+      const res = await server.post("/api/databases.shared_rows", {
+        body: {
+          id: database.id,
+          shareId: share.id,
+          propertyFilter: {
+            conjunction: "and",
+            conditions: [
+              {
+                propertyId: numberId,
+                operator: FilterOperator.Gt,
+                value: 1,
+              },
+            ],
+          },
+          summaries: { [numberId]: "sum" },
+        },
+      });
+      const body = await res.json();
+
+      expect(res.status).toEqual(200);
+      expect(body.data).toHaveLength(2);
+      expect(body.summaries[numberId]).toEqual(5);
+    });
+
+    it("should leave out drafts and archived rows", async () => {
+      const { team, user, collection, database, share } =
+        await buildSharedDatabase();
+      const row = {
+        teamId: team.id,
+        userId: user.id,
+        collectionId: collection.id,
+        databaseId: database.id,
+      };
+      await buildDocument({ ...row, title: "Visible" });
+      await buildDocument({ ...row, title: "Draft", publishedAt: null });
+      await buildDocument({
+        ...row,
+        title: "Archived",
+        archivedAt: new Date(),
+      });
+
+      const res = await server.post("/api/databases.shared_rows", {
+        body: { id: database.id, shareId: share.id },
+      });
+      const body = await res.json();
+
+      expect(body.data.map((item: { title: string }) => item.title)).toEqual([
+        "Visible",
+      ]);
+    });
+
+    it("should not return rows through a share of another document", async () => {
+      const { team, user, collection, database } = await buildSharedDatabase();
+      const other = await buildDocument({
+        teamId: team.id,
+        userId: user.id,
+        collectionId: collection.id,
+      });
+      const share = await buildShare({
+        teamId: team.id,
+        userId: user.id,
+        documentId: other.id,
+      });
+
+      const res = await server.post("/api/databases.shared_rows", {
+        body: { id: database.id, shareId: share.id },
+      });
+
+      expect([403, 404]).toContain(res.status);
+    });
+
+    it("should not return rows through a revoked share", async () => {
+      const { user, database, share } = await buildSharedDatabase();
+      await share.update({ revokedAt: new Date(), revokedById: user.id });
+
+      const res = await server.post("/api/databases.shared_rows", {
+        body: { id: database.id, shareId: share.id },
+      });
+
+      expect(res.status).toEqual(404);
+    });
+
+    it("should require a shareId", async () => {
+      const { database } = await buildSharedDatabase();
+
+      const res = await server.post("/api/databases.shared_rows", {
+        body: { id: database.id },
+      });
+
+      expect(res.status).toEqual(400);
+    });
   });
 });
 

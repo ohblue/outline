@@ -74,6 +74,8 @@ type Props = {
    * protect what a document shows from being edited through it.
    */
   readOnly?: boolean;
+  /** Reads the rows through this public share, as a guest. */
+  shareId?: string;
 };
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -93,6 +95,7 @@ function DatabaseView({
   pageSize = DEFAULT_PAGE_SIZE,
   canEditView,
   readOnly = false,
+  shareId,
 }: Props) {
   const { t } = useTranslation();
   const { databases, documents, dialogs } = useStores();
@@ -220,6 +223,7 @@ function DatabaseView({
         propertySorts: activeView?.sorts?.length ? activeView.sorts : undefined,
         propertyFilter: queryFilter,
         summaries: summaryColumns,
+        shareId,
       }),
     // schema is not part of the request, but a schema change can rewrite row
     // values on the server — e.g. toggling auto-numbering — so rows are
@@ -233,6 +237,7 @@ function DatabaseView({
       summaryColumns,
       schema,
       pageSize,
+      shareId,
     ]
   );
 

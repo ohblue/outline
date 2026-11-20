@@ -1,22 +1,34 @@
 import Router from "koa-router";
-import { Op } from "sequelize";
+import { Op, Sequelize } from "sequelize";
+import type { Order, WhereOptions } from "sequelize";
 import type { Property } from "@shared/types";
 import { PropertyType, TeamPreference } from "@shared/types";
 import { errToString } from "@shared/utils/error";
 import { validateDataViews } from "@shared/utils/properties";
-import { ValidationError } from "@server/errors";
+import {
+  AuthenticationError,
+  NotFoundError,
+  ValidationError,
+} from "@server/errors";
 import auth from "@server/middlewares/authentication";
+import pagination, { paginateQuery } from "../middlewares/pagination";
 import { transaction } from "@server/middlewares/transaction";
 import validate from "@server/middlewares/validate";
 import documentCreator, {
   authorizeDocumentCreate,
 } from "@server/commands/documentCreator";
+import { loadPublicShare } from "@server/commands/shareLoader";
 import type { User } from "@server/models";
 import { Collection, Database, Document } from "@server/models";
+import { PropertyQueryHelper } from "@server/models/helpers/PropertyQueryHelper";
 import { RelationHelper } from "@server/models/helpers/RelationHelper";
+import { RollupHelper } from "@server/models/helpers/RollupHelper";
+import { SummaryHelper } from "@server/models/helpers/SummaryHelper";
 import { authorize } from "@server/policies";
 import { presentDatabase, presentPolicies } from "@server/presenters";
+import { presentSharedDatabaseRow } from "@server/presenters/database";
 import type { APIContext } from "@server/types";
+import { getTeamFromContext } from "@server/utils/passport";
 import * as T from "./schema";
 
 const router = new Router();
@@ -24,6 +36,9 @@ const router = new Router();
 /** Rejects the request when document databases are not enabled for the team. */
 function authorizeFeature(ctx: APIContext) {
   const { user } = ctx.state.auth;
+  if (!user) {
+    throw AuthenticationError("Authentication required");
+  }
   if (!user.team.getPreference(TeamPreference.DocumentDatabases)) {
     throw ValidationError("Document databases are currently disabled");
   }
@@ -98,14 +113,53 @@ router.post(
   }
 );
 
+/**
+ * Resolves a database through a public share. Not finding one is a 404 rather
+ * than a 403 so that a guest cannot tell a database from any other document.
+ */
+async function loadSharedDatabase(
+  ctx: APIContext,
+  { id, shareId }: { id: string; shareId: string }
+) {
+  const team = await getTeamFromContext(ctx, { includeOAuthState: false });
+  const { share, document } = await loadPublicShare({
+    id: shareId,
+    documentId: id,
+    teamId: team?.id,
+  });
+  if (
+    !document ||
+    !share.team.getPreference(TeamPreference.DocumentDatabases)
+  ) {
+    throw NotFoundError();
+  }
+
+  const database = await Database.findByPk(document.id);
+  if (!database) {
+    throw NotFoundError();
+  }
+  database.document = document;
+  return { database, teamId: share.teamId };
+}
+
 router.post(
   "databases.info",
-  auth(),
+  auth({ optional: true }),
   validate(T.DatabasesInfoSchema),
   async (ctx: APIContext<T.DatabasesInfoReq>) => {
-    const { id } = ctx.input.body;
-    const { user } = ctx.state.auth;
+    const { id, shareId } = ctx.input.body;
+
+    if (shareId) {
+      const { database } = await loadSharedDatabase(ctx, { id, shareId });
+      ctx.body = {
+        data: presentDatabase(database),
+        policies: [],
+      };
+      return;
+    }
+
     authorizeFeature(ctx);
+    const { user } = ctx.state.auth;
 
     const database = await Database.findByPk(id);
     if (database) {
@@ -118,6 +172,108 @@ router.post(
     ctx.body = {
       data: presentDatabase(database),
       policies: presentMergedPolicies(user, [database]),
+    };
+  }
+);
+
+router.post(
+  "databases.shared_rows",
+  auth({ optional: true }),
+  pagination(),
+  validate(T.DatabasesSharedRowsSchema),
+  async (ctx: APIContext<T.DatabasesSharedRowsReq>) => {
+    const {
+      id,
+      shareId,
+      propertyFilter,
+      propertySorts,
+      summariesForViewId,
+      summaries: summaryColumns,
+    } = ctx.input.body;
+    const { database, teamId } = await loadSharedDatabase(ctx, { id, shareId });
+
+    const where: WhereOptions<Document> & {
+      [Op.and]: WhereOptions<Document>[];
+    } = {
+      teamId,
+      databaseId: database.id,
+      deletedAt: { [Op.eq]: null },
+      archivedAt: { [Op.eq]: null },
+      publishedAt: { [Op.ne]: null },
+      template: false,
+      sourceMetadata: { trial: { [Op.is]: null } },
+      [Op.and]: [],
+    };
+
+    const { dataSchema } = database;
+    if (propertyFilter) {
+      const condition = PropertyQueryHelper.buildFilter(
+        propertyFilter,
+        dataSchema
+      );
+      if (condition) {
+        where[Op.and].push(condition);
+      }
+    }
+
+    const order = [
+      ...(propertySorts?.length
+        ? PropertyQueryHelper.buildOrder(propertySorts, dataSchema)
+        : []),
+      [Sequelize.literal(`"document"."databaseIndex" collate "C"`), "ASC"],
+      ["createdAt", "ASC"],
+    ] as Order;
+
+    const { results: rows, pagination: page } = await paginateQuery(
+      ctx,
+      ({ offset, limit }) =>
+        Document.unscoped().findAll({
+          attributes: {
+            exclude: ["text", "content", "state"],
+          },
+          where,
+          order,
+          offset,
+          limit,
+        }),
+      () => Document.unscoped().count({ where })
+    );
+
+    const data = rows.map(presentSharedDatabaseRow);
+    const rollups = await RollupHelper.compute(rows, dataSchema);
+    rows.forEach((row, index) => {
+      const computed = rollups.get(row.id);
+      if (computed) {
+        data[index].properties = { ...data[index].properties, ...computed };
+      }
+    });
+
+    let summaries;
+    if (summariesForViewId || summaryColumns) {
+      const view = summariesForViewId
+        ? database.getView(summariesForViewId)
+        : database.resolveView(null);
+      const columns = summaryColumns
+        ? Object.entries(summaryColumns).map(([propertyId, summary]) => ({
+            propertyId,
+            visible: true,
+            summary,
+          }))
+        : view?.columns;
+      if (view && columns?.length) {
+        summaries = await SummaryHelper.compute(
+          { ...view, columns },
+          dataSchema,
+          where
+        );
+      }
+    }
+
+    ctx.body = {
+      pagination: page,
+      data,
+      policies: [],
+      ...(summaries ? { summaries } : {}),
     };
   }
 );

@@ -6,6 +6,7 @@ import Database from "~/models/Database";
 import type Document from "~/models/Document";
 import type { Properties } from "~/types";
 import { client } from "~/utils/ApiClient";
+import { AuthorizationError, NotFoundError } from "~/utils/errors";
 import type RootStore from "./RootStore";
 import Store from "./base/Store";
 
@@ -70,6 +71,35 @@ export default class DatabasesStore extends Store<Database> {
       return models;
     } finally {
       this.isFetching = false;
+    }
+  };
+
+  /**
+   * Loads the database anchored to a document through a public share, which
+   * is how a guest reads one. A document that is not a database, or one the
+   * share does not expose, is not an error here.
+   *
+   * @param id the id of the anchor document.
+   * @param shareId the share the document is being read through.
+   * @returns the database, or undefined if there is none to show.
+   */
+  @action
+  fetchShared = async (
+    id: string,
+    shareId: string
+  ): Promise<Database | undefined> => {
+    try {
+      const res = await client.post("/databases.info", { id, shareId });
+      invariant(res?.data, "Data not available");
+      return runInAction(() => this.add(res.data));
+    } catch (error) {
+      if (
+        error instanceof NotFoundError ||
+        error instanceof AuthorizationError
+      ) {
+        return undefined;
+      }
+      throw error;
     }
   };
 

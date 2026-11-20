@@ -12,6 +12,7 @@ import { sanitizeImageSrc } from "@shared/utils/urls";
 import type Document from "~/models/Document";
 import NudeButton from "~/components/NudeButton";
 import DatabaseRowMenu from "./DatabaseRowMenu";
+import useRowPath from "../hooks/useRowPath";
 import RowTitleInput from "./RowTitleInput";
 
 type Props = {
@@ -89,6 +90,7 @@ const GalleryCard = observer(function GalleryCard_({
   onTitleDone: () => void;
   onDelete?: (document: Document) => void;
 }) {
+  const rowPath = useRowPath(document);
   // the first visible image property doubles as the card's cover image
   const coverProperty = properties.find(
     (item) => item.type === PropertyType.Image
@@ -112,7 +114,7 @@ const GalleryCard = observer(function GalleryCard_({
       {isEditingTitle ? (
         <RowTitleInput document={document} onDone={onTitleDone} />
       ) : (
-        <CardTitle to={document.path}>{document.titleWithDefault}</CardTitle>
+        <CardTitle to={rowPath}>{document.titleWithDefault}</CardTitle>
       )}
       {properties.map((property) => {
         if (property.id === coverProperty?.id) {

@@ -96,10 +96,24 @@ function DocumentScene({
     TeamPreference.DocumentDatabases
   );
   React.useEffect(() => {
-    if (databasesEnabled && !databases.isLoaded && !databases.isFetching) {
+    if (
+      !shareId &&
+      databasesEnabled &&
+      !databases.isLoaded &&
+      !databases.isFetching
+    ) {
       void databases.loadAll();
     }
-  }, [databasesEnabled, databases]);
+  }, [shareId, databasesEnabled, databases]);
+
+  // a guest has no list of databases to consult, so the share is asked
+  // whether this document is one
+  const documentId = document.id;
+  React.useEffect(() => {
+    if (shareId) {
+      void databases.fetchShared(documentId, shareId).catch(() => undefined);
+    }
+  }, [shareId, documentId, databases]);
 
   const editorRef = useRef<TEditor>(null);
 
@@ -329,10 +343,10 @@ function DocumentScene({
 
   // a document sharing its id with a database anchors that database; its
   // page shows the database's views in place of a text body
-  const isDatabaseDocument =
-    !isShare &&
-    !!auth.team?.getPreference(TeamPreference.DocumentDatabases) &&
-    !!databases.get(document.id);
+  const isDatabaseDocument = isShare
+    ? !!databases.get(document.id)
+    : !!auth.team?.getPreference(TeamPreference.DocumentDatabases) &&
+      !!databases.get(document.id);
 
   const hasEmojiInTitle = determineIconType(document.icon) === IconType.Emoji;
   const pageTitle = hasEmojiInTitle
@@ -431,8 +445,11 @@ function DocumentScene({
                 ) : isDatabaseDocument ? (
                   <>
                     <Notices document={document} readOnly={readOnly} />
-                    <DatabaseDocumentTitle document={document} />
-                    <DocumentDatabase document={document} />
+                    <DatabaseDocumentTitle
+                      document={document}
+                      readOnly={isShare}
+                    />
+                    <DocumentDatabase document={document} shareId={shareId} />
                     <ReferencesWrapper>
                       <References document={document} />
                     </ReferencesWrapper>

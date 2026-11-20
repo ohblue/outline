@@ -419,16 +419,26 @@ export default class DocumentsStore extends Store<Document> {
       propertySorts?: DataViewSort[];
       /** The column summaries to compute, keyed by property id. */
       summaries?: Record<string, SummaryAggregation>;
+      /** Reads the rows through this public share instead of as a member. */
+      shareId?: string;
     } & PaginationParams
   ): Promise<{ rows: Document[]; summaries?: DataViewSummaries }> => {
     this.isFetching = true;
 
     try {
-      const res = await client.post("/documents.list", {
-        sort: "databaseIndex",
-        direction: "ASC",
-        ...options,
-      });
+      const { databaseId, shareId, ...rest } = options;
+      const res = shareId
+        ? await client.post("/databases.shared_rows", {
+            id: databaseId,
+            shareId,
+            ...rest,
+          })
+        : await client.post("/documents.list", {
+            sort: "databaseIndex",
+            direction: "ASC",
+            databaseId,
+            ...rest,
+          });
       invariant(res?.data, "Document list not available");
       runInAction(() => {
         res.data.forEach(this.add);

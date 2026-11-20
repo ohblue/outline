@@ -45,9 +45,14 @@ export type DatabaseViewSource = {
  * view are saved on the database, so they apply wherever it is rendered.
  *
  * @param database the database being rendered.
+ * @param options `readOnly` keeps view changes from being saved, for readers
+ * who may only look at the database.
  * @returns the view source.
  */
-export function useSavedViewSource(database: Database): DatabaseViewSource {
+export function useSavedViewSource(
+  database: Database,
+  { readOnly = false }: { readOnly?: boolean } = {}
+): DatabaseViewSource {
   const [persistedViewId, setPersistedViewId] = usePersistedState<
     string | undefined
   >(`database-view:${database.id}`, undefined);
@@ -57,7 +62,7 @@ export function useSavedViewSource(database: Database): DatabaseViewSource {
 
   const updateView = React.useCallback(
     async (attrs: Partial<DataView>) => {
-      if (!viewId) {
+      if (!viewId || readOnly) {
         return;
       }
       const views = (database.views ?? []).map((item) =>
@@ -69,7 +74,7 @@ export function useSavedViewSource(database: Database): DatabaseViewSource {
         toast.error(errToString(error));
       }
     },
-    [database, viewId]
+    [database, viewId, readOnly]
   );
 
   const views = database.views ?? [];

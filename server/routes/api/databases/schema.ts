@@ -8,7 +8,7 @@ import {
   SummaryAggregation,
 } from "@shared/types";
 import { DatabaseValidation, PropertyValidation } from "@shared/validations";
-import { zodIconType, zodIdType } from "@server/utils/zod";
+import { zodIconType, zodIdType, zodShareIdType } from "@server/utils/zod";
 import { ValidateColor } from "@server/validation";
 import { BaseSchema } from "../schema";
 
@@ -100,10 +100,30 @@ const BaseIdSchema = z.object({
 });
 
 export const DatabasesInfoSchema = BaseSchema.extend({
-  body: BaseIdSchema,
+  body: BaseIdSchema.extend({
+    /** Share the database is being read through, for unauthenticated access */
+    shareId: zodShareIdType().optional(),
+  }),
 });
 
 export type DatabasesInfoReq = z.infer<typeof DatabasesInfoSchema>;
+
+export const DatabasesSharedRowsSchema = BaseSchema.extend({
+  body: BaseIdSchema.extend({
+    /** Share that exposes the database */
+    shareId: zodShareIdType(),
+    /** Structured filter over the rows' properties */
+    propertyFilter: FilterGroupSchema.optional(),
+    /** Sort levels over the rows' properties, applied before manual order */
+    propertySorts: PropertySortsSchema.optional(),
+    /** Id of the saved view whose column summaries to compute */
+    summariesForViewId: z.uuid().optional(),
+    /** Column summaries to compute, replacing those the view configures */
+    summaries: z.record(z.string(), z.enum(SummaryAggregation)).optional(),
+  }),
+});
+
+export type DatabasesSharedRowsReq = z.infer<typeof DatabasesSharedRowsSchema>;
 
 export const DatabasesListSchema = BaseSchema.extend({
   body: z.object({

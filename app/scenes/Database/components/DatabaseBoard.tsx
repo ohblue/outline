@@ -29,6 +29,7 @@ import type Document from "~/models/Document";
 import NudeButton from "~/components/NudeButton";
 import usePolicy from "~/hooks/usePolicy";
 import DatabaseRowMenu from "./DatabaseRowMenu";
+import useRowPath from "../hooks/useRowPath";
 import RowTitleInput from "./RowTitleInput";
 
 type Props = {
@@ -236,6 +237,7 @@ const BoardCard = observer(function BoardCard_({
   onDelete?: (document: Document) => void;
 }) {
   const can = usePolicy(document);
+  const rowPath = useRowPath(document);
   // a card of a protected view is read through, never written through
   const canEditRow = !readOnly && can.update;
   const { attributes, listeners, setNodeRef, transform, isDragging } =
@@ -281,7 +283,7 @@ const BoardCard = observer(function BoardCard_({
       {isEditingTitle ? (
         <RowTitleInput document={document} onDone={onTitleDone} />
       ) : (
-        <CardTitle to={document.path}>{document.titleWithDefault}</CardTitle>
+        <CardTitle to={rowPath}>{document.titleWithDefault}</CardTitle>
       )}
       {cardProperties.map((item) => {
         const value = document.propertyValue(item.id);

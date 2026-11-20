@@ -23,6 +23,8 @@ const iconSize = 32;
 type Props = {
   /** The database's anchor document whose title to show. */
   document: Document;
+  /** Shows the title without a way to rename it or change its icon. */
+  readOnly?: boolean;
 };
 
 /**
@@ -30,10 +32,11 @@ type Props = {
  * with click-to-rename and an icon picker. It stands in for the document
  * editor — a database page shows its views rather than a text body.
  */
-function DatabaseDocumentTitle({ document }: Props) {
+function DatabaseDocumentTitle({ document, readOnly = false }: Props) {
   const { t } = useTranslation();
   const { documents } = useStores();
-  const can = usePolicy(document);
+  const policy = usePolicy(document);
+  const can = { update: !readOnly && policy.update };
   const [isEditing, setIsEditing] = React.useState(false);
   const [value, setValue] = React.useState(document.title);
 

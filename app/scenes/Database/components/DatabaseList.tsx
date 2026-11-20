@@ -10,6 +10,7 @@ import type { Property } from "@shared/types";
 import { groupByProperty } from "@shared/utils/properties";
 import type Document from "~/models/Document";
 import NudeButton from "~/components/NudeButton";
+import useRowPath from "../hooks/useRowPath";
 import RowTitleInput from "./RowTitleInput";
 
 type Props = {
@@ -153,6 +154,7 @@ const ListRow = observer(function ListRow_({
   onToggleExpand?: (rowId: string) => void;
 }) {
   const { t } = useTranslation();
+  const rowPath = useRowPath(document);
   const indentStyle = depth > 0 ? { paddingLeft: 12 + depth * 20 } : undefined;
 
   if (isEditingTitle) {
@@ -178,7 +180,7 @@ const ListRow = observer(function ListRow_({
           <CollapsedIcon size={18} />
         </DisclosureButton>
       )}
-      <RowTitle to={document.path}>{document.titleWithDefault}</RowTitle>
+      <RowTitle to={rowPath}>{document.titleWithDefault}</RowTitle>
       <RowValues>
         {properties.map((property) => {
           const value = document.propertyValue(property.id);

@@ -11,6 +11,11 @@ import useStores from "~/hooks/useStores";
 type Props = {
   /** The document whose anchored database to render, if it has one. */
   document: Document;
+  /**
+   * The public share the document is being read through. The database is then
+   * rendered read-only from what the share exposes, with no sign-in needed.
+   */
+  shareId?: string;
 };
 
 /**
@@ -18,9 +23,10 @@ type Props = {
  * saved-view tabs, the toolbar and the rows. A document is a database when a
  * database facet shares its id; for ordinary documents nothing is rendered.
  */
-function DocumentDatabase({ document }: Props) {
+function DocumentDatabase({ document, shareId }: Props) {
   const { auth, databases } = useStores();
-  const enabled = !!auth.team?.getPreference(TeamPreference.DocumentDatabases);
+  const enabled =
+    !shareId && !!auth.team?.getPreference(TeamPreference.DocumentDatabases);
 
   // the sidebar usually loads all databases already; this covers direct
   // navigation paths where it has not run yet
@@ -30,14 +36,16 @@ function DocumentDatabase({ document }: Props) {
     }
   }, [enabled, databases]);
 
-  const database = enabled ? databases.get(document.id) : undefined;
+  // a share is answered by the server, which only returns the database when
+  // the team has the feature on
+  const database = enabled || shareId ? databases.get(document.id) : undefined;
   if (!database) {
     return null;
   }
 
   return (
     <Section>
-      <SavedViews database={database} />
+      <SavedViews database={database} shareId={shareId} />
     </Section>
   );
 }
@@ -48,11 +56,21 @@ function DocumentDatabase({ document }: Props) {
  */
 const SavedViews = observer(function SavedViews_({
   database,
+  shareId,
 }: {
   database: Database;
+  shareId?: string;
 }) {
-  const source = useSavedViewSource(database);
-  return <DatabaseView database={database} source={source} />;
+  const readOnly = !!shareId;
+  const source = useSavedViewSource(database, { readOnly });
+  return (
+    <DatabaseView
+      database={database}
+      source={source}
+      shareId={shareId}
+      readOnly={readOnly}
+    />
+  );
 });
 
 const Section = styled.div`

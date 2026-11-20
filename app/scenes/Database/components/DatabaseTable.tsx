@@ -47,6 +47,7 @@ import DatabaseAddProperty from "./DatabaseAddProperty";
 import DatabasePropertyMenu from "./DatabasePropertyMenu";
 import DatabaseRowMenu from "./DatabaseRowMenu";
 import DatabaseSummaryRow from "./DatabaseSummaryRow";
+import useRowPath from "../hooks/useRowPath";
 import RowTitleInput from "./RowTitleInput";
 
 type Props = {
@@ -794,6 +795,7 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
 }) {
   const { t } = useTranslation();
   const can = usePolicy(document);
+  const rowPath = useRowPath(document);
   // a row of a protected view is read through, never written through
   const canEditRow = !readOnly && can.update;
   const [isRenaming, setIsRenaming] = React.useState(false);
@@ -906,13 +908,13 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
                   </TitleText>
                 ) : (
                   <TitleLink
-                    to={document.path}
+                    to={rowPath}
                     $wrap={wrappedColumnIds.has(TITLE_COLUMN_ID)}
                   >
                     {document.titleWithDefault}
                   </TitleLink>
                 )}
-                <OpenLink to={document.path} aria-label={t("Open")}>
+                <OpenLink to={rowPath} aria-label={t("Open")}>
                   <OpenIcon size={16} />
                   <OpenLabel>{t("Open")}</OpenLabel>
                 </OpenLink>
