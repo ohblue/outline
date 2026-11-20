@@ -9,12 +9,10 @@ on:
     branches:
       - main
       - "feat/**"
+      - "fix/**"
     tags:
       - "v*"
   workflow_dispatch:
-
-env:
-  IMAGE: ghcr.io/plinsboorg/outline
 
 jobs:
   build:
@@ -26,6 +24,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      # Image names must be lowercase; the owner login may not be.
+      - name: Resolve image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/outline" >> "$GITHUB_ENV"
 
       # The base build unpacks node_modules twice and writes a full client
       # bundle; the runner's default free space is not enough headroom.
